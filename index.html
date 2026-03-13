@@ -103,8 +103,8 @@
             const ctxPrev = canvasPrev.getContext('2d', { willReadFrequently: true });
             const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
             
-            const THRESHOLD = 90;
-            const SENSITIVITY = 0.55;
+            const THRESHOLD = 99;
+            const SENSITIVITY = 0.9;
 
             function check() {
                 canvasCurr.width = canvasPrev.width = 80; // 負荷軽減のため縮小
