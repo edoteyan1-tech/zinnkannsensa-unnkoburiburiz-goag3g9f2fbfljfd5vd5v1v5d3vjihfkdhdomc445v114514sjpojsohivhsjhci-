@@ -104,7 +104,7 @@ function setupMotionDetection(video) {
     
     // 【反応を少し良くするための再調整】
     const THRESHOLD = 60;      // 130から60へ（色の変化をもっと拾う）
-    const SENSITIVITY = 0.15;  // 0.35から0.15へ（画面の15%の変化で反応）
+    const SENSITIVITY = 0.05;  // 0.35から0.15へ（画面の15%の変化で反応）
     const LEARNING_RATE = 0.02; // 背景の更新をさらにゆっくりに
     
     let isCoolingDown = false;
