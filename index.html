@@ -97,46 +97,61 @@
             }
         }
 
-        function setupMotionDetection(video) {
+ function setupMotionDetection(video) {
     const canvasPrev = document.getElementById('canvasPrev');
     const canvasCurr = document.getElementById('canvasCurr');
     const ctxPrev = canvasPrev.getContext('2d', { willReadFrequently: true });
     const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
     
-    // 感度をさらに下げ、面積も厳しめに設定
-    const THRESHOLD = 200;    
-    const SENSITIVITY = 0.6;  // 画面の20%が変わらないと反応しない
+    // 【さらに厳しめの設定】
+    const THRESHOLD = 120;     // 色の差がかなり大きくないと無視
+    const SENSITIVITY = 0.25;  // 画面の25%が動かないと無視
+    const REQUIRED_STREAK = 3; // 3フレーム連続で検知して初めて通知
     
-    let isCoolingDown = false; // 通知の連打を防ぐフラグ
+    let isCoolingDown = false;
+    let detectionStreak = 0;
+    let isInitialized = false;
+
+    // 起動直後の3秒間はカメラが安定しないので無視
+    setTimeout(() => { isInitialized = true; }, 3000);
 
     function check() {
-        canvasCurr.width = canvasPrev.width = 80;
-        canvasCurr.height = canvasPrev.height = 60;
+        canvasCurr.width = canvasPrev.width = 40; // さらに解像度を下げて細かなノイズを無視
+        canvasCurr.height = canvasPrev.height = 30;
         
-        ctxCurr.drawImage(video, 0, 0, 80, 60);
-        const currData = ctxCurr.getImageData(0, 0, 80, 60).data;
-        const prevData = ctxPrev.getImageData(0, 0, 80, 60).data;
+        ctxCurr.drawImage(video, 0, 0, 40, 30);
+        const currData = ctxCurr.getImageData(0, 0, 40, 30).data;
+        const prevData = ctxPrev.getImageData(0, 0, 40, 30).data;
 
         let diff = 0;
         for (let i = 0; i < currData.length; i += 4) {
-            if (Math.abs(currData[i] - prevData[i]) > THRESHOLD) diff++;
-        }
-
-        // 検知ロジック：動きがあり、かつ「お休み期間中」でない場合のみ送信
-        if (diff / (80 * 60) > SENSITIVITY && !isCoolingDown) {
-            if (conn && conn.open) {
-                conn.send('ALARM');
-                
-                // --- 連打防止策 ---
-                isCoolingDown = true;
-                console.log("検知！5秒間通知を停止します");
-                
-                setTimeout(() => {
-                    isCoolingDown = false;
-                    console.log("監視再開");
-                }, 5000); // 5秒間は次の通知を送らない
+            // 明るさの変化を簡易計算
+            const brightnessCurr = (currData[i] + currData[i+1] + currData[i+2]) / 3;
+            const brightnessPrev = (prevData[i] + prevData[i+1] + prevData[i+2]) / 3;
+            
+            if (Math.abs(brightnessCurr - brightnessPrev) > THRESHOLD) {
+                diff++;
             }
         }
+
+        const ratio = diff / (40 * 30);
+
+        if (isInitialized && ratio > SENSITIVITY) {
+            detectionStreak++; // 検知回数をカウントアップ
+        } else {
+            detectionStreak = 0; // 動きが止まったらリセット
+        }
+
+        // 規定回数（3回）連続で動きを検知し、かつお休み期間中でなければ通知
+        if (detectionStreak >= REQUIRED_STREAK && !isCoolingDown) {
+            if (conn && conn.open) {
+                conn.send('ALARM');
+                isCoolingDown = true;
+                setTimeout(() => { isCoolingDown = false; }, 8000); // 次の通知まで8秒空ける
+            }
+            detectionStreak = 0; 
+        }
+
         ctxPrev.drawImage(canvasCurr, 0, 0);
         requestAnimationFrame(check);
     }
