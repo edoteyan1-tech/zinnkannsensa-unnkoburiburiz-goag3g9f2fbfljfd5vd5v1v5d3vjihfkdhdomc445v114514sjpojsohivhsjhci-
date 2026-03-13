@@ -98,38 +98,50 @@
         }
 
         function setupMotionDetection(video) {
-            const canvasPrev = document.getElementById('canvasPrev');
-            const canvasCurr = document.getElementById('canvasCurr');
-            const ctxPrev = canvasPrev.getContext('2d', { willReadFrequently: true });
-            const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
-            
-            const THRESHOLD = 99;
-            const SENSITIVITY = 0.9;
+    const canvasPrev = document.getElementById('canvasPrev');
+    const canvasCurr = document.getElementById('canvasCurr');
+    const ctxPrev = canvasPrev.getContext('2d', { willReadFrequently: true });
+    const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
+    
+    // 感度をさらに下げ、面積も厳しめに設定
+    const THRESHOLD = 100;    
+    const SENSITIVITY = 0.2;  // 画面の20%が変わらないと反応しない
+    
+    let isCoolingDown = false; // 通知の連打を防ぐフラグ
 
-            function check() {
-                canvasCurr.width = canvasPrev.width = 80; // 負荷軽減のため縮小
-                canvasCurr.height = canvasPrev.height = 60;
-                
-                ctxCurr.drawImage(video, 0, 0, 80, 60);
-                const currData = ctxCurr.getImageData(0, 0, 80, 60).data;
-                const prevData = ctxPrev.getImageData(0, 0, 80, 60).data;
+    function check() {
+        canvasCurr.width = canvasPrev.width = 80;
+        canvasCurr.height = canvasPrev.height = 60;
+        
+        ctxCurr.drawImage(video, 0, 0, 80, 60);
+        const currData = ctxCurr.getImageData(0, 0, 80, 60).data;
+        const prevData = ctxPrev.getImageData(0, 0, 80, 60).data;
 
-                let diff = 0;
-                for (let i = 0; i < currData.length; i += 4) {
-                    if (Math.abs(currData[i] - prevData[i]) > THRESHOLD) diff++;
-                }
-
-                if (diff / (80 * 60) > SENSITIVITY) {
-                    if (conn && conn.open) {
-                        conn.send('ALARM');
-                    }
-                }
-                ctxPrev.drawImage(canvasCurr, 0, 0);
-                requestAnimationFrame(check);
-            }
-            check();
+        let diff = 0;
+        for (let i = 0; i < currData.length; i += 4) {
+            if (Math.abs(currData[i] - prevData[i]) > THRESHOLD) diff++;
         }
 
+        // 検知ロジック：動きがあり、かつ「お休み期間中」でない場合のみ送信
+        if (diff / (80 * 60) > SENSITIVITY && !isCoolingDown) {
+            if (conn && conn.open) {
+                conn.send('ALARM');
+                
+                // --- 連打防止策 ---
+                isCoolingDown = true;
+                console.log("検知！5秒間通知を停止します");
+                
+                setTimeout(() => {
+                    isCoolingDown = false;
+                    console.log("監視再開");
+                }, 5000); // 5秒間は次の通知を送らない
+            }
+        }
+        ctxPrev.drawImage(canvasCurr, 0, 0);
+        requestAnimationFrame(check);
+    }
+    check();
+}
         // --- 受信モードの処理 ---
         function startReceiverMode() {
             document.getElementById('mode-selection').classList.add('hidden');
