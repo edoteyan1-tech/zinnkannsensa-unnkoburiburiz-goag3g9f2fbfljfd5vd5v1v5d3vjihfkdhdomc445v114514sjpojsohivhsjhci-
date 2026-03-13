@@ -95,13 +95,17 @@ function setupMotionDetection(video) {
     const canvasCurr = document.getElementById('canvasCurr');
     const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
     
-    // 背景（平均）を保持するバッファ
+    // デバッグ用の表示エリアを作成
+    const debugDiv = document.createElement('div');
+    debugDiv.style = "position:fixed; top:10px; left:10px; background:rgba(0,0,0,0.7); padding:5px; font-family:monospace; font-size:12px; z-index:9999;";
+    document.body.appendChild(debugDiv);
+
     let avgData = null;
     
-    // 【超・鈍感設定】
-    const THRESHOLD = 130;     // 明るさの変化しきい値（かなり高く設定）
-    const SENSITIVITY = 0.35;  // 画面の35%が変化しないと無視
-    const LEARNING_RATE = 0.05; // 背景の変化に追従する速度（小さいほど急な変化に強い）
+    // 【反応を少し良くするための再調整】
+    const THRESHOLD = 60;      // 130から60へ（色の変化をもっと拾う）
+    const SENSITIVITY = 0.15;  // 0.35から0.15へ（画面の15%の変化で反応）
+    const LEARNING_RATE = 0.02; // 背景の更新をさらにゆっくりに
     
     let isCoolingDown = false;
     let detectionStreak = 0;
@@ -114,13 +118,10 @@ function setupMotionDetection(video) {
 
         canvasCurr.width = 40;
         canvasCurr.height = 30;
-        ctxCurr.filter = 'grayscale(100%) brightness(100%) contrast(100%)';
+        ctxCurr.filter = 'grayscale(100%)';
         ctxCurr.drawImage(video, 0, 0, 40, 30);
         
         const currData = ctxCurr.getImageData(0, 0, 40, 30).data;
-        const totalPixels = 40 * 30;
-
-        // 最初のフレームで背景を初期化
         if (!avgData) {
             avgData = new Float32Array(currData.length);
             for (let i = 0; i < currData.length; i++) avgData[i] = currData[i];
@@ -128,28 +129,40 @@ function setupMotionDetection(video) {
 
         let diff = 0;
         for (let i = 0; i < currData.length; i += 4) {
-            // 背景（平均値）との差を計算
-            if (Math.abs(currData[i] - avgData[i]) > THRESHOLD) {
-                diff++;
-            }
-            // 徐々に今の映像を背景に混ぜていく（ゆっくりとした環境光の変化に対応）
+            if (Math.abs(currData[i] - avgData[i]) > THRESHOLD) diff++;
+            // 背景をじわじわ更新
             avgData[i] += (currData[i] - avgData[i]) * LEARNING_RATE;
         }
 
-        const ratio = diff / totalPixels;
+        const ratio = diff / (40 * 30);
 
-        // 35%〜85%の範囲の変化のみ反応
-        if (ratio > SENSITIVITY && ratio < 0.85) {
+        // --- デバッグ表示の更新 ---
+        debugDiv.innerHTML = `
+            DIFF RATIO: ${(ratio * 100).toFixed(1)}% <br>
+            THRESHOLD: ${THRESHOLD} <br>
+            TARGET: ${(SENSITIVITY * 100).toFixed(1)}% <br>
+            STREAK: ${detectionStreak}
+        `;
+
+        // 判定：SENSITIVITY（15%）を超えたらカウントアップ
+        if (ratio > SENSITIVITY && ratio < 0.9) {
             detectionStreak++;
+            debugDiv.style.color = "lime";
         } else {
-            detectionStreak = Math.max(0, detectionStreak - 1); // じわじわ減らす
+            detectionStreak = Math.max(0, detectionStreak - 1);
+            debugDiv.style.color = "white";
         }
 
-        if (detectionStreak >= 6 && !isCoolingDown) {
+        // 3フレーム連続で検知したらアラーム送信
+        if (detectionStreak >= 3 && !isCoolingDown) {
             if (conn && conn.open) {
                 conn.send('ALARM');
                 isCoolingDown = true;
-                setTimeout(() => { isCoolingDown = false; }, 5000);
+                debugDiv.style.background = "red";
+                setTimeout(() => { 
+                    isCoolingDown = false; 
+                    debugDiv.style.background = "rgba(0,0,0,0.7)";
+                }, 4000);
             }
             detectionStreak = 0;
         }
