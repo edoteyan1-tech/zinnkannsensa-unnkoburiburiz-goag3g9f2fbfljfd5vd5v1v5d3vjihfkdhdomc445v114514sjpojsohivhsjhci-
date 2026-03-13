@@ -97,39 +97,40 @@
             }
         }
 
- function setupMotionDetection(video) {
+        function setupMotionDetection(video) {
     const canvasPrev = document.getElementById('canvasPrev');
     const canvasCurr = document.getElementById('canvasCurr');
     const ctxPrev = canvasPrev.getContext('2d', { willReadFrequently: true });
     const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
     
-    // 【さらに厳しめの設定】
-    const THRESHOLD = 120;     // 色の差がかなり大きくないと無視
-    const SENSITIVITY = 0.25;  // 画面の25%が動かないと無視
-    const REQUIRED_STREAK = 3; // 3フレーム連続で検知して初めて通知
+    // 【感度設定：グレースケール時は少し数値を下げても安定します】
+    const THRESHOLD = 90;      // 明るさの差（0-255）
+    const SENSITIVITY = 0.25;  // 変化面積（25%）
+    const REQUIRED_STREAK = 4; // 4フレーム連続検知で確定（より慎重に）
     
     let isCoolingDown = false;
     let detectionStreak = 0;
     let isInitialized = false;
 
-    // 起動直後の3秒間はカメラが安定しないので無視
     setTimeout(() => { isInitialized = true; }, 3000);
 
     function check() {
-        canvasCurr.width = canvasPrev.width = 40; // さらに解像度を下げて細かなノイズを無視
+        // 低解像度化（40x30）でノイズを平均化
+        canvasCurr.width = canvasPrev.width = 40;
         canvasCurr.height = canvasPrev.height = 30;
         
+        // --- グレースケール描画 ---
+        // Canvasのfilterを使って、描画時点で白黒にする
+        ctxCurr.filter = 'grayscale(100%)';
         ctxCurr.drawImage(video, 0, 0, 40, 30);
+        
         const currData = ctxCurr.getImageData(0, 0, 40, 30).data;
         const prevData = ctxPrev.getImageData(0, 0, 40, 30).data;
 
         let diff = 0;
+        // グレースケールなので R=G=B になっているため、R（i番目）だけ比較すればOK
         for (let i = 0; i < currData.length; i += 4) {
-            // 明るさの変化を簡易計算
-            const brightnessCurr = (currData[i] + currData[i+1] + currData[i+2]) / 3;
-            const brightnessPrev = (prevData[i] + prevData[i+1] + prevData[i+2]) / 3;
-            
-            if (Math.abs(brightnessCurr - brightnessPrev) > THRESHOLD) {
+            if (Math.abs(currData[i] - prevData[i]) > THRESHOLD) {
                 diff++;
             }
         }
@@ -137,21 +138,21 @@
         const ratio = diff / (40 * 30);
 
         if (isInitialized && ratio > SENSITIVITY) {
-            detectionStreak++; // 検知回数をカウントアップ
+            detectionStreak++;
         } else {
-            detectionStreak = 0; // 動きが止まったらリセット
+            detectionStreak = 0; 
         }
 
-        // 規定回数（3回）連続で動きを検知し、かつお休み期間中でなければ通知
         if (detectionStreak >= REQUIRED_STREAK && !isCoolingDown) {
             if (conn && conn.open) {
                 conn.send('ALARM');
                 isCoolingDown = true;
-                setTimeout(() => { isCoolingDown = false; }, 8000); // 次の通知まで8秒空ける
+                setTimeout(() => { isCoolingDown = false; }, 8000);
             }
             detectionStreak = 0; 
         }
 
+        // 次回比較用に保存（ここもグレースケール状態で保存される）
         ctxPrev.drawImage(canvasCurr, 0, 0);
         requestAnimationFrame(check);
     }
