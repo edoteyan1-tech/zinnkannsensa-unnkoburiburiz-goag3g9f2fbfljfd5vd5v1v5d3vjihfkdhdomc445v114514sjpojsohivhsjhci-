@@ -91,71 +91,73 @@
             }
         }
 
-        function setupMotionDetection(video) {
-            const canvasPrev = document.getElementById('canvasPrev');
-            const canvasCurr = document.getElementById('canvasCurr');
-            const ctxPrev = canvasPrev.getContext('2d', { willReadFrequently: true });
-            const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
-            
-            const THRESHOLD = 110;
-            const SENSITIVITY = 0.3; // 画面の30%
-            const REQUIRED_STREAK = 5;
-            
-            let isCoolingDown = false;
-            let detectionStreak = 0;
-            let setupFrames = 0;
+function setupMotionDetection(video) {
+    const canvasCurr = document.getElementById('canvasCurr');
+    const ctxCurr = canvasCurr.getContext('2d', { willReadFrequently: true });
+    
+    // 背景（平均）を保持するバッファ
+    let avgData = null;
+    
+    // 【超・鈍感設定】
+    const THRESHOLD = 130;     // 明るさの変化しきい値（かなり高く設定）
+    const SENSITIVITY = 0.35;  // 画面の35%が変化しないと無視
+    const LEARNING_RATE = 0.05; // 背景の変化に追従する速度（小さいほど急な変化に強い）
+    
+    let isCoolingDown = false;
+    let detectionStreak = 0;
 
-            function check() {
-                // カメラ映像がない場合は何もしない
-                if (!video.srcObject || video.videoWidth === 0) {
-                    requestAnimationFrame(check);
-                    return;
-                }
-
-                canvasCurr.width = canvasPrev.width = 40;
-                canvasCurr.height = canvasPrev.height = 30;
-                
-                ctxCurr.filter = 'grayscale(100%)';
-                ctxCurr.drawImage(video, 0, 0, 40, 30);
-                
-                if (setupFrames < 60) { // 最初の60フレームは学習
-                    ctxPrev.drawImage(canvasCurr, 0, 0);
-                    setupFrames++;
-                    requestAnimationFrame(check);
-                    return;
-                }
-
-                const currData = ctxCurr.getImageData(0, 0, 40, 30).data;
-                const prevData = ctxPrev.getImageData(0, 0, 40, 30).data;
-
-                let diff = 0;
-                for (let i = 0; i < currData.length; i += 4) {
-                    if (Math.abs(currData[i] - prevData[i]) > THRESHOLD) diff++;
-                }
-
-                const ratio = diff / (40 * 30);
-
-                // 30%以上90%未満の変化で検知
-                if (ratio > SENSITIVITY && ratio < 0.9) {
-                    detectionStreak++;
-                } else {
-                    detectionStreak = 0;
-                }
-
-                if (detectionStreak >= REQUIRED_STREAK && !isCoolingDown) {
-                    if (conn && conn.open) {
-                        conn.send('ALARM');
-                        isCoolingDown = true;
-                        setTimeout(() => { isCoolingDown = false; }, 5000);
-                    }
-                    detectionStreak = 0;
-                }
-
-                ctxPrev.drawImage(canvasCurr, 0, 0);
-                requestAnimationFrame(check);
-            }
-            check();
+    function check() {
+        if (!video.srcObject || video.videoWidth === 0) {
+            requestAnimationFrame(check);
+            return;
         }
+
+        canvasCurr.width = 40;
+        canvasCurr.height = 30;
+        ctxCurr.filter = 'grayscale(100%) brightness(100%) contrast(100%)';
+        ctxCurr.drawImage(video, 0, 0, 40, 30);
+        
+        const currData = ctxCurr.getImageData(0, 0, 40, 30).data;
+        const totalPixels = 40 * 30;
+
+        // 最初のフレームで背景を初期化
+        if (!avgData) {
+            avgData = new Float32Array(currData.length);
+            for (let i = 0; i < currData.length; i++) avgData[i] = currData[i];
+        }
+
+        let diff = 0;
+        for (let i = 0; i < currData.length; i += 4) {
+            // 背景（平均値）との差を計算
+            if (Math.abs(currData[i] - avgData[i]) > THRESHOLD) {
+                diff++;
+            }
+            // 徐々に今の映像を背景に混ぜていく（ゆっくりとした環境光の変化に対応）
+            avgData[i] += (currData[i] - avgData[i]) * LEARNING_RATE;
+        }
+
+        const ratio = diff / totalPixels;
+
+        // 35%〜85%の範囲の変化のみ反応
+        if (ratio > SENSITIVITY && ratio < 0.85) {
+            detectionStreak++;
+        } else {
+            detectionStreak = Math.max(0, detectionStreak - 1); // じわじわ減らす
+        }
+
+        if (detectionStreak >= 6 && !isCoolingDown) {
+            if (conn && conn.open) {
+                conn.send('ALARM');
+                isCoolingDown = true;
+                setTimeout(() => { isCoolingDown = false; }, 5000);
+            }
+            detectionStreak = 0;
+        }
+
+        requestAnimationFrame(check);
+    }
+    check();
+}
 
         function startReceiverMode() {
             document.getElementById('mode-selection').classList.add('hidden');
